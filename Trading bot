@@ -1,0 +1,710 @@
+We are building a sophisticated trading bot that operates on a 5-minute entry signal with a 1-hour confirmation, using advanced modeling techniques. The bot will be designed to adapt to different market regimes, with a focus on low volatility ranging markets.
+
+Key Components:
+
+    Regime Detection using Hidden Markov Models (HMM): To identify the current market regime (e.g., low volatility ranging, high volatility trending, etc.).
+
+    Advanced Hybrid LSTM + Attention Models: For generating trading signals on the 5-minute chart, confirmed by the 1-hour chart.
+
+    Kelly Criterion for Position Sizing: To dynamically adjust the bet size based on the perceived edge and risk.
+
+We'll structure the bot into several modules:
+
+    Data Handler
+
+    Regime Detection (HMM)
+
+    Neural Network Model (LSTM + Attention) for 5-minute and 1-hour signals
+
+    Signal Integration and Confirmation
+
+    Risk Management and Position Sizing (Kelly)
+
+    Execution (for the purpose of this guide, we'll focus on the strategy and not the actual execution)
+
+Let's break down each part:
+1. Data Handler
+
+We need to fetch and preprocess data for both 5-minute and 1-hour timeframes. The data should include at least the following features: Open, High, Low, Close, Volume (OHLCV). We may also compute additional features such as volatility, moving averages, etc.
+2. Regime Detection using HMM
+
+We will use HMM to identify market regimes. The HMM will be trained on features that help distinguish regimes, such as volatility, trend, and volume. We can use the 1-hour data for regime detection to get a broader view of the market.
+3. Neural Network Model (LSTM + Attention)
+
+We will build a hybrid model that uses CNN for feature extraction, LSTM for temporal dependencies, and Attention to focus on important time steps. This model will be used to predict the direction of price movement on the 5-minute and 1-hour charts.
+
+We will have two models:
+
+    A 5-minute model for entry signals.
+
+    A 1-hour model for confirmation.
+
+The 5-minute model will generate a signal (e.g., 1 for buy, -1 for sell, 0 for hold) and the 1-hour model will also generate a signal. We will only take a trade if both models agree.
+4. Signal Integration and Confirmation
+
+The signals from the 5-minute and 1-hour models are combined. Only when both models agree on the direction do we consider taking a trade.
+5. Risk Management and Position Sizing (Kelly)
+
+We use the Kelly Criterion to determine the fraction of capital to allocate to each trade. The Kelly formula is:
+f∗=pa−qb
+f∗=ap​−bq​
+
+Where:
+
+    pp is the probability of winning
+
+    qq is the probability of losing (1 - p)
+
+    aa is the loss per unit invested (if the trade loses, we lose 'a' times the investment)
+
+    bb is the gain per unit invested (if the trade wins, we gain 'b' times the investment)
+
+In practice, we often use the fractional Kelly (e.g., half Kelly) to reduce risk.
+
+We will estimate p (win probability) from the model's historical accuracy and b/a from the average win/loss ratio.
+6. Execution
+
+We will not implement actual execution in this guide, but we will assume that we can execute at the close of the 5-minute bar where the signal is generated.
+Implementation Steps:
+Step 1: Data Preprocessing
+
+We will need to:
+
+    Align the 5-minute and 1-hour data.
+
+    Create features for the HMM and the neural network.
+
+Step 2: Train HMM for Regime Detection
+
+We will train the HMM on 1-hour data. The features for HMM could be:
+
+    Log returns
+
+    Volatility (e.g., standard deviation of returns over a window)
+
+    Volume profile (e.g., volume relative to moving average of volume)
+
+We assume a number of regimes (e.g., 2 to 4). After training, we can assign each time step to a regime.
+Step 3: Train the Hybrid LSTM + Attention Model
+
+We will train two models: one for 5-minute and one for 1-hour. The model architecture:
+
+    Input: a sequence of past bars (e.g., 50 bars for 5-minute, 100 bars for 1-hour)
+
+    CNN for feature extraction from each bar (if we use multiple features per bar, we can use 1D CNN along the time axis).
+
+    LSTM to process the sequence of CNN-extracted features.
+
+    Attention layer to weight the importance of each time step.
+
+    Output: a softmax for classification (3 classes: buy, sell, hold) or a regression for continuous value (we'll use classification for this guide).
+
+We will train the models on historical data, and we will use the regime information to train separate models for each regime? Or we can include the regime as a feature. Given the complexity, we might include the regime as a feature.
+Step 4: Signal Generation
+
+For each new 5-minute bar:
+
+    Get the current regime from the HMM (using the latest 1-hour data).
+
+    Run the 5-minute model on the recent 5-minute data (last 50 bars) and the 1-hour model on the recent 1-hour data (last 100 bars).
+
+    If the 5-minute model and the 1-hour model both output the same direction (both buy or both sell), then we generate a signal.
+
+Step 5: Position Sizing
+
+We use the Kelly Criterion to determine the position size. We need to estimate:
+
+    p: the historical accuracy of the model for the current regime (we can track the model's performance in each regime).
+
+    b and a: the average win and loss per trade (in percentage terms) for the current regime.
+
+We then compute the Kelly fraction and use a fraction of it (e.g., half).
+Step 6: Backtesting
+
+We will backtest the strategy over a period of time, taking into account transaction costs and slippage.
+Code Structure Outline
+
+We'll create the following classes:
+
+    DataHandler
+
+    HMMRegimeDetector
+
+    HybridLSTMAttentionModel
+
+    SignalGenerator
+
+    RiskManager
+
+    TradingBot
+
+Let's start by writing the code for each class.
+
+Note: This is a conceptual guide and the code below is simplified for illustration.
+DataHandler
+python
+
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+
+class DataHandler:
+    def __init__(self, data_source):
+        self.data_source = data_source
+        self.scalers = {}
+
+    def fetch_data(self, symbol, timeframe, start_date, end_date):
+        # Implementation depends on data source (e.g., CSV, API)
+        pass
+
+    def preprocess_data(self, df, features):
+        # Normalize the features
+        for feature in features:
+            if feature not in self.scalers:
+                self.scalers[feature] = StandardScaler()
+            df[feature] = self.scalers[feature].fit_transform(df[feature].values.reshape(-1, 1))
+        return df
+
+    def calculate_technical_indicators(self, df):
+        # Calculate RSI, MACD, Volatility, etc.
+        pass
+
+HMMRegimeDetector
+python
+
+from hmmlearn import hmm
+
+class HMMRegimeDetector:
+    def __init__(self, n_regimes=2):
+        self.n_regimes = n_regimes
+        self.model = hmm.GaussianHMM(n_components=n_regimes, covariance_type="diag", n_iter=1000)
+
+    def fit(self, features):
+        self.model.fit(features)
+
+    def predict_regime(self, features):
+        return self.model.predict(features)
+
+HybridLSTMAttentionModel
+
+We'll use TensorFlow/Keras to build the model.
+python
+
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, LSTM, Dense, Conv1D, MaxPooling1D, Flatten, Reshape, Attention
+
+class HybridLSTMAttentionModel:
+    def __init__(self, input_shape, num_classes):
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+        self.model = self.build_model()
+
+    def build_model(self):
+        inputs = Input(shape=self.input_shape)
+        
+        # CNN for feature extraction
+        cnn = Conv1D(filters=64, kernel_size=3, activation='relu')(inputs)
+        cnn = MaxPooling1D(pool_size=2)(cnn)
+        cnn = Conv1D(filters=32, kernel_size=3, activation='relu')(cnn)
+        cnn = MaxPooling1D(pool_size=2)(cnn)
+        cnn = Flatten()(cnn)
+        cnn = Dense(100, activation='relu')(cnn)
+        cnn = Reshape((100, 1))(cnn)  # Reshape for LSTM
+
+        # LSTM layer
+        lstm = LSTM(50, return_sequences=True)(cnn)
+        
+        # Attention layer
+        attention = Attention()([lstm, lstm])
+        attention = Flatten()(attention)
+        
+        # Output layer
+        outputs = Dense(self.num_classes, activation='softmax')(attention)
+        
+        model = Model(inputs=inputs, outputs=outputs)
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        return model
+
+    def train(self, X, y, validation_data=None, epochs=10, batch_size=32):
+        history = self.model.fit(X, y, validation_data=validation_data, epochs=epochs, batch_size=batch_size)
+        return history
+
+    def predict(self, X):
+        return self.model.predict(X)
+
+SignalGenerator
+python
+
+class SignalGenerator:
+    def __init__(self, model_5m, model_1h, regime_detector):
+        self.model_5m = model_5m
+        self.model_1h = model_1h
+        self.regime_detector = regime_detector
+
+    def generate_signal(self, data_5m, data_1h, current_regime):
+        # Preprocess the data for the models
+        # ...
+
+        # Predict with 5m model
+        pred_5m = self.model_5m.predict(data_5m)
+        signal_5m = np.argmax(pred_5m, axis=1)[-1]  # 0: sell, 1: hold, 2: buy
+
+        # Predict with 1h model
+        pred_1h = self.model_1h.predict(data_1h)
+        signal_1h = np.argmax(pred_1h, axis=1)[-1]
+
+        # If both models agree, return the signal, else 0 (hold)
+        if signal_5m == signal_1h and signal_5m != 1:
+            return signal_5m  # 0 for sell, 2 for buy
+        else:
+            return 1  # hold
+
+RiskManager
+python
+
+class RiskManager:
+    def __init__(self, capital, kelly_fraction=0.5):
+        self.capital = capital
+        self.kelly_fraction = kelly_fraction
+        self.win_rate = 0.0
+        self.win_loss_ratio = 0.0
+
+    def update_performance(self, trades):
+        # trades is a list of (outcome: win/loss, amount)
+        wins = [t for t in trades if t[0] == 'win']
+        losses = [t for t in trades if t[0] == 'loss']
+        self.win_rate = len(wins) / len(trades) if trades else 0
+        avg_win = np.mean([t[1] for t in wins]) if wins else 0
+        avg_loss = np.mean([t[1] for t in losses]) if losses else 0
+        self.win_loss_ratio = avg_win / abs(avg_loss) if avg_loss != 0 else 0
+
+    def calculate_position_size(self, signal_confidence):
+        # We use the win_rate and win_loss_ratio to compute Kelly
+        # But note: the Kelly formula for betting is: f* = (p * b - q) / b
+        # where p is win rate, q=1-p, b is the net odds (win_loss_ratio)
+        # However, in trading, we often use the average win vs average loss.
+
+        p = self.win_rate
+        q = 1 - p
+        b = self.win_loss_ratio
+
+        if b == 0:
+            return 0
+
+        kelly_f = (p * b - q) / b
+        # Use fractional Kelly
+        kelly_f = kelly_f * self.kelly_fraction
+        # Cap the position size to a maximum (e.g., 20% of capital)
+        max_position = 0.2 * self.capital
+        position_size = kelly_f * self.capital
+        return min(position_size, max_position)
+
+TradingBot
+python
+
+class TradingBot:
+    def __init__(self, data_handler, regime_detector, signal_generator, risk_manager):
+        self.data_handler = data_handler
+        self.regime_detector = regime_detector
+        self.signal_generator = signal_generator
+        self.risk_manager = risk_manager
+        self.positions = []
+
+    def run(self):
+        # Main loop
+        # For each 5-minute bar:
+        #   Fetch the latest data
+        #   Detect regime (on 1-hour data)
+        #   Generate signal
+        #   Calculate position size
+        #   Place order (if any)
+        pass
+
+Focus on Low Volatility Ranging Markets
+
+To adapt the bot for low volatility ranging markets, we can:
+
+    Regime Detection: The HMM should be trained to identify low volatility ranging regimes. We can use volatility (standard deviation of returns) and a measure of trend (e.g., ADX) as features.
+
+    Model Training: The neural network models (5-minute and 1-hour) can be trained specifically on data from low volatility ranging regimes. This might help them generate better signals in such conditions.
+
+    Signal Generation: In ranging markets, we might want to use mean-reversion strategies. The neural network can be trained to predict reversals. We can also adjust the technical indicators to be more suitable for ranging markets (e.g., use RSI and Bollinger Bands).
+
+    Risk Management: In low volatility markets, we might adjust the position sizing (e.g., use a higher Kelly fraction because the models might be more confident) or adjust the stop-loss and take-profit levels to be tighter.
+
+Conclusion
+
+This guide provides a high-level framework for building a robust trading bot. Each component requires careful implementation and testing. Backtesting and forward testing are crucial to validate the strategy.
+
+Remember that trading involves risk, and past performance is not indicative of future results.
+Guide: Building a Robust Medium-Frequency Trading Bot for Ranging Markets
+Executive Summary
+
+This guide provides a comprehensive framework for developing a medium-frequency trading bot (5-minute entry, 1-hour confirmation) specifically optimized for low volatility ranging markets using Hidden Markov Models, Advanced Hybrid LSTM + Attention Networks, and Kelly Criterion position sizing.
+🎯 System Architecture Overview
+1. Hidden Markov Model for Regime Detection
+Core Implementation
+python
+
+import hmmlearn.hmm as hmm
+import numpy as np
+
+class RegimeHMM:
+    def __init__(self, n_regimes=3):
+        self.n_regimes = n_regimes
+        self.model = hmm.GaussianHMM(
+            n_components=n_regimes,
+            covariance_type="diag",
+            n_iter=1000
+        )
+        self.regime_history = []
+        
+    def extract_regime_features(self, data_1h):
+        """Extract features for HMM regime classification"""
+        features = np.column_stack([
+            data_1h['returns'].rolling(20).std(),  # Volatility
+            data_1h['high'] / data_1h['low'] - 1,  # Range size
+            data_1h['volume'].pct_change(),         # Volume changes
+            self.calculate_adx(data_1h),           # Trend strength
+            self.calculate_rsi(data_1h, 14),       # Momentum
+            data_1h['close'].rolling(50).mean() / data_1h['close'] - 1  # Mean reversion
+        ])
+        return features.dropna()
+    
+    def detect_ranging_regime(self, current_features):
+        """Identify low volatility ranging conditions"""
+        volatility = current_features[0]
+        adx = current_features[3]
+        mean_reversion = abs(current_features[5])
+        
+        # Ranging market criteria
+        is_ranging = (
+            volatility < np.percentile(self.volatility_history, 30) and
+            adx < 25 and  # Weak trend
+            mean_reversion < 0.02  # Close to moving average
+        )
+        return is_ranging
+
+2. Advanced Hybrid LSTM + Attention Model
+Architecture Design
+python
+
+import tensorflow as tf
+from tensorflow.keras.layers import LSTM, Dense, Attention, Conv1D, concatenate
+
+class HybridLSTMAttention(tf.keras.Model):
+    def __init__(self, time_steps=60, n_features=15):
+        super().__init__()
+        
+        # CNN Feature Extractor
+        self.conv1 = Conv1D(filters=32, kernel_size=3, activation='relu')
+        self.conv2 = Conv1D(filters=64, kernel_size=3, activation='relu')
+        
+        # LSTM Encoder
+        self.lstm1 = LSTM(128, return_sequences=True, dropout=0.2)
+        self.lstm2 = LSTM(64, return_sequences=True, dropout=0.2)
+        
+        # Attention Mechanism
+        self.attention = Attention()
+        
+        # Multi-head Output
+        self.regime_head = Dense(3, activation='softmax', name='regime')
+        self.direction_head = Dense(2, activation='softmax', name='direction')
+        self.confidence_head = Dense(1, activation='sigmoid', name='confidence')
+        
+    def call(self, inputs):
+        # CNN feature extraction
+        x = self.conv1(inputs)
+        x = self.conv2(x)
+        
+        # LSTM sequence processing
+        lstm_out = self.lstm1(x)
+        lstm_out = self.lstm2(lstm_out)
+        
+        # Self-attention
+        attention_out = self.attention([lstm_out, lstm_out])
+        
+        # Multi-task learning
+        regime = self.regime_head(attention_out[:, -1, :])
+        direction = self.direction_head(attention_out[:, -1, :])
+        confidence = self.confidence_head(attention_out[:, -1, :])
+        
+        return regime, direction, confidence
+
+Feature Engineering for Ranging Markets
+python
+
+class RangingMarketFeatures:
+    def __init__(self):
+        self.feature_scalers = {}
+    
+    def calculate_bollinger_squeeze(self, data, period=20, std_dev=2):
+        """Bollinger Band squeeze indicator for ranging markets"""
+        sma = data['close'].rolling(period).mean()
+        std = data['close'].rolling(period).std()
+        
+        upper_band = sma + (std * std_dev)
+        lower_band = sma - (std * std_dev)
+        band_width = (upper_band - lower_band) / sma
+        
+        return band_width, (data['close'] - lower_band) / (upper_band - lower_band)
+    
+    def calculate_mean_reversion_features(self, data_5m, data_1h):
+        """Features optimized for ranging market mean reversion"""
+        features = {}
+        
+        # 5-minute features
+        features['rsi_5m'] = self.calculate_rsi(data_5m['close'], 14)
+        features['stochastic_5m'] = self.calculate_stochastic(data_5m, 14)
+        features['price_vs_ma'] = data_5m['close'] / data_5m['close'].rolling(20).mean() - 1
+        
+        # 1-hour confirmation features
+        features['bb_squeeze_1h'], features['bb_position_1h'] = \
+            self.calculate_bollinger_squeeze(data_1h)
+        features['adx_1h'] = self.calculate_adx(data_1h)
+        features['atr_ratio'] = self.calculate_atr(data_5m, 14) / self.calculate_atr(data_1h, 14)
+        
+        # Volume features
+        features['volume_z'] = (
+            data_5m['volume'] - data_5m['volume'].rolling(20).mean()
+        ) / data_5m['volume'].rolling(20).std()
+        
+        return pd.DataFrame(features)
+
+3. Multi-Timeframe Signal Generation
+python
+
+class SignalGenerator:
+    def __init__(self):
+        self.model = HybridLSTMAttention()
+        self.confidence_threshold = 0.65
+        
+    def generate_signal(self, data_5m, data_1h, current_regime):
+        """Generate signals with 5m entry and 1h confirmation"""
+        
+        # Only trade in ranging regimes
+        if current_regime != 'ranging':
+            return 0, 0.0, "Non-ranging regime"
+        
+        # Extract features
+        features_5m = self.prepare_5m_features(data_5m)
+        features_1h = self.prepare_1h_features(data_1h)
+        
+        # Model prediction
+        regime_pred, direction_pred, confidence = self.model.predict(
+            np.concatenate([features_5m, features_1h], axis=1)
+        )
+        
+        # Signal logic for ranging markets
+        signal = self.ranging_market_signal(
+            direction_pred, confidence, features_5m, features_1h
+        )
+        
+        return signal, confidence, "Ranging market signal"
+    
+    def ranging_market_signal(self, direction, confidence, features_5m, features_1h):
+        """Specific signal logic for ranging markets"""
+        
+        # Extract key indicators
+        rsi_5m = features_5m['rsi_5m'].iloc[-1]
+        bb_position_1h = features_1h['bb_position_1h'].iloc[-1]
+        bb_squeeze_1h = features_1h['bb_squeeze_1h'].iloc[-1]
+        
+        # Ranging market entry conditions
+        if (confidence > self.confidence_threshold and 
+            bb_squeeze_1h < 0.1):  # Bollinger squeeze
+            
+            if rsi_5m < 30 and bb_position_1h < 0.2:
+                return 1  # Buy signal (oversold bounce)
+            elif rsi_5m > 70 and bb_position_1h > 0.8:
+                return -1  # Sell signal (overbought rejection)
+        
+        return 0  # No signal
+
+4. Regime-Adaptive Kelly Criterion
+python
+
+class AdaptiveKellyCriterion:
+    def __init__(self, initial_capital=10000, kelly_fraction=0.5):
+        self.capital = initial_capital
+        self.kelly_fraction = kelly_fraction
+        self.regime_performance = {
+            'ranging': {'win_rate': 0.55, 'win_loss_ratio': 1.8},
+            'trending': {'win_rate': 0.45, 'win_loss_ratio': 2.2},
+            'volatile': {'win_rate': 0.35, 'win_loss_ratio': 2.5}
+        }
+        
+    def calculate_position_size(self, signal_confidence, regime, current_volatility):
+        """Regime-adaptive Kelly position sizing"""
+        
+        # Get regime-specific parameters
+        regime_params = self.regime_performance[regime]
+        win_rate = regime_params['win_rate']
+        win_loss_ratio = regime_params['win_loss_ratio']
+        
+        # Adjust for signal confidence
+        adjusted_win_rate = win_rate * signal_confidence
+        
+        # Classic Kelly formula
+        kelly_f = adjusted_win_rate - (1 - adjusted_win_rate) / win_loss_ratio
+        
+        # Apply fractional Kelly and volatility scaling
+        fractional_kelly = max(0, kelly_f * self.kelly_fraction)
+        
+        # Reduce position size in high volatility
+        vol_adjustment = 1.0 / (1.0 + current_volatility * 10)
+        
+        position_size = self.capital * fractional_kelly * vol_adjustment
+        
+        # Maximum position size constraints
+        max_position = self.capital * 0.1  # 10% of capital
+        return min(position_size, max_position)
+    
+    def update_regime_performance(self, regime, trade_result):
+        """Update regime-specific performance metrics"""
+        # Update win rate and win/loss ratio for the regime
+        pass
+
+5. Complete Trading System Integration
+python
+
+class RangingMarketTradingBot:
+    def __init__(self):
+        self.regime_detector = RegimeHMM()
+        self.signal_generator = SignalGenerator()
+        self.position_sizer = AdaptiveKellyCriterion()
+        self.risk_manager = RiskManager()
+        
+        # Ranging market specific parameters
+        self.ranging_params = {
+            'max_position_size': 0.1,  # 10% of capital
+            'stop_loss_atr_multiple': 1.5,
+            'take_profit_atr_multiple': 2.0,
+            'max_daily_trades': 5
+        }
+    
+    def trading_cycle(self, data_5m, data_1h):
+        """Complete trading cycle for ranging markets"""
+        
+        # 1. Regime detection
+        current_regime, regime_confidence = self.regime_detector.detect_regime(data_1h)
+        
+        # Only proceed if in ranging regime with high confidence
+        if current_regime != 'ranging' or regime_confidence < 0.7:
+            return "Wait - unsuitable regime"
+        
+        # 2. Signal generation
+        signal, confidence, rationale = self.signal_generator.generate_signal(
+            data_5m, data_1h, current_regime
+        )
+        
+        if signal == 0:
+            return "No signal generated"
+        
+        # 3. Position sizing
+        current_volatility = data_1h['atr'].iloc[-1] / data_1h['close'].iloc[-1]
+        position_size = self.position_sizer.calculate_position_size(
+            confidence, current_regime, current_volatility
+        )
+        
+        # 4. Risk management checks
+        risk_approved = self.risk_manager.approve_trade(
+            signal, position_size, current_regime
+        )
+        
+        if not risk_approved:
+            return "Trade rejected by risk management"
+        
+        # 5. Execute trade
+        self.execute_trade(signal, position_size, data_5m, rationale)
+        
+        return f"Trade executed: {signal} with size {position_size:.2f}"
+    
+    def execute_trade(self, signal, size, data_5m, rationale):
+        """Execute trade with ranging market optimized parameters"""
+        current_price = data_5m['close'].iloc[-1]
+        atr = data_5m['atr'].iloc[-1]
+        
+        # Ranging market specific stops
+        if signal == 1:  # Buy
+            stop_loss = current_price - (atr * self.ranging_params['stop_loss_atr_multiple'])
+            take_profit = current_price + (atr * self.ranging_params['take_profit_atr_multiple'])
+        else:  # Sell
+            stop_loss = current_price + (atr * self.ranging_params['stop_loss_atr_multiple'])
+            take_profit = current_price - (atr * self.ranging_params['take_profit_atr_multiple'])
+        
+        # Execute order with tight spreads (important for ranging markets)
+        self.place_order(signal, size, current_price, stop_loss, take_profit, rationale)
+
+6. Performance Monitoring & Adaptation
+python
+
+class PerformanceMonitor:
+    def __init__(self):
+        self.regime_performance = {}
+        self.feature_importance = {}
+        
+    def analyze_ranging_market_performance(self, trades, market_regimes):
+        """Specific analysis for ranging market performance"""
+        ranging_trades = [t for t in trades if market_regimes[t.entry_time] == 'ranging']
+        
+        if not ranging_trades:
+            return {}
+        
+        metrics = {
+            'win_rate': len([t for t in ranging_trades if t.pnl > 0]) / len(ranging_trades),
+            'avg_win': np.mean([t.pnl for t in ranging_trades if t.pnl > 0]),
+            'avg_loss': np.mean([t.pnl for t in ranging_trades if t.pnl < 0]),
+            'profit_factor': abs(
+                sum(t.pnl for t in ranging_trades if t.pnl > 0) / 
+                sum(t.pnl for t in ranging_trades if t.pnl < 0)
+            ),
+            'sharpe_ratio': self.calculate_sharpe([t.pnl for t in ranging_trades])
+        }
+        
+        return metrics
+    
+    def detect_regime_shift(self, current_features, historical_features):
+        """Detect when market shifts away from ranging regime"""
+        # Monitor for increased volatility, trend strength, or volume spikes
+        pass
+
+7. Key Success Factors for Ranging Markets
+Data Quality & Feature Engineering
+
+    Use quality bid/ask data for precise entry/exit
+
+    Focus on mean-reversion indicators (RSI, Bollinger Bands, Stochastic)
+
+    Volume confirmation for breakout/breakdown signals
+
+    Volatility normalization across different market conditions
+
+Model Training Specifics
+python
+
+# Training data selection for ranging markets
+ranging_periods = historical_data[
+    (historical_data['volatility'] < historical_data['volatility'].quantile(0.3)) &
+    (historical_data['adx'] < 25) &
+    (abs(historical_data['returns']).rolling(20).mean() < 0.001)
+]
+
+# Custom loss function for ranging markets
+def ranging_market_loss(y_true, y_pred):
+    # Penalize false signals more in ranging markets
+    # Reward accurate mean-reversion predictions
+    base_loss = tf.keras.losses.categorical_crossentropy(y_true, y_pred)
+    regime_penalty = tf.where(y_true[:, 0] == 1, 0.5, 1.0)  # Lower penalty for ranging regime
+    return base_loss * regime_penalty
+
+Risk Management for Ranging Markets
+
+    Tighter stop-losses (1.5-2x ATR vs 2-3x for trending markets)
+
+    Smaller position sizes due to lower expected moves
+
+    More frequent rebalancing to capture small profit opportunities
+
+    Correlation awareness - many instruments range simultaneously
